@@ -1,73 +1,168 @@
-/**
- * App.jsx (UI mejorada estilo ChatGPT) - FIX DUPLICADOS + STREAMING SSE
- *
- * Incluye:
- * - Tema oscuro
- * - Burbujas modernas (usuario derecha / asistente izquierda)
- * - Auto-scroll al final
- * - Enter envía / Shift+Enter nueva línea
- * - Indicador "Escribiendo..."
- * - Streaming SSE robusto (parsea eventos completos)
- *
- * NOTA:
- * - Tu backend debe emitir SSE con eventos:
- *   event: delta  data: {"delta":"..."}
- *   event: done   data: {"ok":true}
- *   event: error  data: {"error":"..."}
- */
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = "http://localhost:8080";
 
+// ===== Helpers de persistencia =====
+const LS_KEY = "chatgpt_clone_v1";
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function saveState(state) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+  } catch {
+    // Si localStorage falla (raro), no rompemos la app
+  }
+}
+
+// ===== Generador simple de IDs =====
+function uid() {
+  return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
+// ===== Título sugerido por el primer mensaje del usuario =====
+function deriveTitleFromMessages(msgs) {
+  const firstUser = msgs.find((m) => m.role === "user" && typeof m.content === "string");
+  if (!firstUser) return "Nuevo chat";
+  const t = firstUser.content.trim().replace(/\s+/g, " ");
+  return t.length > 28 ? t.slice(0, 28) + "…" : t;
+}
+
 export default function App() {
-  // ====== Estado del chat ======
-  const [messages, setMessages] = useState([
-    { role: "assistant", content: "Hola 👋 Soy tu Clon ChatGPT mejorado. ¿En qué te ayudo?" }
-  ]);
+  // ===== Estado principal (multi-chat) =====
+  const [chats, setChats] = useState(() => {
+    const saved = loadState();
+    if (saved?.chats?.length) return saved.chats;
+    // chat inicial
+    return [
+      {
+        id: uid(),
+        title: "Nuevo chat",
+        createdAt: Date.now(),
+        messages: [
+          {
+            role: "assistant",
+            content: "Hola 👋 Soy tu clon tipo ChatGPT. ¿Qué quieres hacer hoy?"
+          }
+        ]
+      }
+    ];
+  });
 
-  // ====== Input (multilínea) ======
+  const [activeChatId, setActiveChatId] = useState(() => {
+    const saved = loadState();
+    if (saved?.activeChatId) return saved.activeChatId;
+    return null;
+  });
+
+  // Si no hay activeChatId (primera vez), usamos el primero
+  useEffect(() => {
+    if (!activeChatId && chats.length) setActiveChatId(chats[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persistir en localStorage cada vez que cambie
+  useEffect(() => {
+    saveState({ chats, activeChatId });
+  }, [chats, activeChatId]);
+
+  // ===== UI state =====
   const [input, setInput] = useState("");
-
-  // ====== Estado de streaming ======
   const [isStreaming, setIsStreaming] = useState(false);
 
   // Auto-scroll
   const bottomRef = useRef(null);
 
+  const activeChat = useMemo(() => chats.find((c) => c.id === activeChatId), [chats, activeChatId]);
+  const activeMessages = activeChat?.messages || [];
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [activeChatId, activeMessages.length]);
 
-  /**
-   * Historial base (solo user/assistant).
-   * Esto es lo que enviamos al backend como contexto.
-   */
-  const chatHistory = useMemo(() => {
-    return messages.filter((m) => m.role === "user" || m.role === "assistant");
-  }, [messages]);
+  // ===== Acciones multi-chat =====
+  function createNewChat() {
+    if (isStreaming) return;
+    const newChat = {
+      id: uid(),
+      title: "Nuevo chat",
+      createdAt: Date.now(),
+      messages: [
+        { role: "assistant", content: "Nuevo chat ✅ ¿En qué te ayudo?" }
+      ]
+    };
+    setChats((prev) => [newChat, ...prev]);
+    setActiveChatId(newChat.id);
+    setInput("");
+  }
 
-  /**
-   * Enviar mensaje al backend.
-   * FIX importante: NO duplicar el mensaje del usuario.
-   */
+  function deleteChat(chatId) {
+    if (isStreaming) return;
+    setChats((prev) => {
+      const filtered = prev.filter((c) => c.id !== chatId);
+      // si borras el activo, mover al primero
+      if (chatId === activeChatId) {
+        const next = filtered[0]?.id || null;
+        setActiveChatId(next);
+      }
+      return filtered.length ? filtered : [
+        {
+          id: uid(),
+          title: "Nuevo chat",
+          createdAt: Date.now(),
+          messages: [{ role: "assistant", content: "Hola 👋 ¿Qué quieres hacer hoy?" }]
+        }
+      ];
+    });
+  }
+
+  function clearActiveChat() {
+    if (isStreaming || !activeChat) return;
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? {
+              ...c,
+              title: "Nuevo chat",
+              messages: [{ role: "assistant", content: "Chat limpio ✅ ¿En qué te ayudo ahora?" }]
+            }
+          : c
+      )
+    );
+  }
+
+  // ===== Enviar mensaje (streaming) =====
   async function sendMessage() {
-    if (!input.trim() || isStreaming) return;
+    if (!input.trim() || isStreaming || !activeChat) return;
 
     const userMsg = { role: "user", content: input.trim() };
 
-    // 1) Limpiar input y activar streaming
     setInput("");
     setIsStreaming(true);
 
-    // 2) Agregar UNA sola vez: mensaje usuario + placeholder del assistant
-    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
+    // 1) Insertar user + placeholder assistant (1 sola vez)
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeChat.id
+          ? { ...c, messages: [...c.messages, userMsg, { role: "assistant", content: "" }] }
+          : c
+      )
+    );
+
+    // 2) Construir el historial a enviar (sin el placeholder)
+    const outgoing = [...activeChat.messages, userMsg].filter(
+      (m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string"
+    );
 
     try {
-      // Construimos el historial a enviar (incluye el nuevo userMsg)
-      const outgoing = [...chatHistory, userMsg];
-
-      // Llamada al backend SSE
       const res = await fetch(`${API_URL}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -80,32 +175,27 @@ export default function App() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
-
-      // Buffer para manejar eventos SSE que llegan partidos
       let buffer = "";
 
-      /**
-       * Agrega texto al último mensaje del asistente
-       */
       const appendAssistant = (delta) => {
-        setMessages((prev) => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last?.role === "assistant") {
-            copy[copy.length - 1] = { ...last, content: last.content + delta };
-          }
-          return copy;
-        });
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== activeChat.id) return c;
+            const msgs = [...c.messages];
+            const last = msgs[msgs.length - 1];
+            if (last?.role === "assistant") {
+              msgs[msgs.length - 1] = { ...last, content: last.content + delta };
+            }
+            return { ...c, messages: msgs };
+          })
+        );
       };
 
-      // Leemos el stream
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // Un evento SSE termina con doble salto de línea
         const events = buffer.split("\n\n");
         buffer = events.pop() || "";
 
@@ -124,36 +214,38 @@ export default function App() {
             data = {};
           }
 
-          if (eventName === "delta") {
-            appendAssistant(data.delta || "");
-          }
-
-          if (eventName === "error") {
-            appendAssistant(`\n\n⚠️ ${data.error || "Error desconocido"}`);
-          }
-
-          // event: done -> no hacemos nada especial aquí;
-          // el stream cerrará cuando el backend haga res.end()
+          if (eventName === "delta") appendAssistant(data.delta || "");
+          if (eventName === "error") appendAssistant(`\n\n⚠️ ${data.error || "Error desconocido"}`);
         }
       }
+
+      // 3) Actualizar título del chat si aún dice "Nuevo chat"
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id !== activeChat.id) return c;
+          if (c.title !== "Nuevo chat") return c;
+          const title = deriveTitleFromMessages(c.messages);
+          return { ...c, title };
+        })
+      );
     } catch (err) {
-      // Si falla, mostramos el error en el último mensaje del asistente
-      setMessages((prev) => {
-        const copy = [...prev];
-        const last = copy[copy.length - 1];
-        if (last?.role === "assistant") {
-          copy[copy.length - 1] = { ...last, content: last.content + `\n\n⚠️ ${err.message}` };
-        }
-        return copy;
-      });
+      // Escribir error en el último mensaje assistant
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id !== activeChat.id) return c;
+          const msgs = [...c.messages];
+          const last = msgs[msgs.length - 1];
+          if (last?.role === "assistant") {
+            msgs[msgs.length - 1] = { ...last, content: last.content + `\n\n⚠️ ${err.message}` };
+          }
+          return { ...c, messages: msgs };
+        })
+      );
     } finally {
       setIsStreaming(false);
     }
   }
 
-  /**
-   * Enter envía / Shift+Enter hace salto de línea
-   */
   function handleKeyDown(e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -161,39 +253,88 @@ export default function App() {
     }
   }
 
-  /**
-   * (Opcional) Limpiar chat
-   */
-  function clearChat() {
-    if (isStreaming) return;
-    setMessages([{ role: "assistant", content: "Chat limpio ✅ ¿En qué te ayudo ahora?" }]);
-  }
-
   return (
     <div style={styles.page}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 14 }}>My ChatGPT Clone</div>
-          <div style={{ fontSize: 12, opacity: 0.75 }}>
-            IA local con Ollama + streaming (gratis)
+      {/* Sidebar */}
+      <aside style={styles.sidebar}>
+        <div style={styles.sidebarTop}>
+          <div style={styles.brand}>
+            <div style={{ fontWeight: 900 }}>My ChatGPT Clone</div>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Streaming + Ollama</div>
           </div>
+
+          <button onClick={createNewChat} disabled={isStreaming} style={styles.primaryBtn}>
+            + Nuevo chat
+          </button>
         </div>
 
-        <button onClick={clearChat} disabled={isStreaming} style={styles.ghostBtn}>
-          Limpiar
-        </button>
-      </div>
+        <div style={styles.chatList}>
+          {chats.map((c) => {
+            const active = c.id === activeChatId;
+            return (
+              <div
+                key={c.id}
+                style={{ ...styles.chatItem, ...(active ? styles.chatItemActive : {}) }}
+                onClick={() => !isStreaming && setActiveChatId(c.id)}
+                role="button"
+                tabIndex={0}
+              >
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <div style={styles.bullet} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.chatTitle}>{c.title}</div>
+                    <div style={styles.chatMeta}>
+                      {new Date(c.createdAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                </div>
 
-      {/* Contenedor centrado */}
-      <div style={styles.container}>
-        {/* Zona de chat con scroll interno */}
-        <div style={styles.chat}>
-          {messages.map((m, idx) => (
+                <button
+                  type="button"
+                  title="Eliminar chat"
+                  style={styles.iconBtn}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteChat(c.id);
+                  }}
+                  disabled={isStreaming}
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={styles.sidebarFooter}>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            Tip: Enter envía · Shift+Enter nueva línea
+          </div>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main style={styles.main}>
+        <header style={styles.header}>
+          <div>
+            <div style={{ fontWeight: 800 }}>{activeChat?.title || "Chat"}</div>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>
+              Backend SSE · IA local Ollama
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={clearActiveChat} disabled={isStreaming} style={styles.ghostBtn}>
+              Limpiar chat
+            </button>
+          </div>
+        </header>
+
+        <section style={styles.chatArea}>
+          {activeMessages.map((m, idx) => (
             <MessageBubble key={idx} role={m.role} content={m.content} />
           ))}
 
-          {/* Indicador "escribiendo..." */}
           {isStreaming && (
             <div style={styles.typing}>
               <span style={styles.dot} />
@@ -204,17 +345,16 @@ export default function App() {
           )}
 
           <div ref={bottomRef} />
-        </div>
+        </section>
 
-        {/* Barra inferior fija dentro del contenedor */}
-        <div style={styles.inputWrap}>
+        <footer style={styles.inputWrap}>
           <textarea
             style={styles.textarea}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Escribe tu mensaje… (Enter envía, Shift+Enter nueva línea)"
-            disabled={isStreaming}
+            placeholder="Escribe tu mensaje…"
+            disabled={isStreaming || !activeChat}
           />
 
           <button
@@ -229,44 +369,115 @@ export default function App() {
           >
             {isStreaming ? "..." : "Enviar"}
           </button>
-        </div>
-
-        <div style={styles.footerNote}>
-          Consejo: prueba “Explícame React con un ejemplo simple”.
-        </div>
-      </div>
+        </footer>
+      </main>
     </div>
   );
 }
 
-/**
- * Burbuja del chat
- */
 function MessageBubble({ role, content }) {
   const isUser = role === "user";
-
   return (
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
       <div style={isUser ? styles.userBubble : styles.assistantBubble}>
         <div style={styles.roleLabel}>{isUser ? "Tú" : "Asistente"}</div>
-        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{content}</div>
+        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{content}</div>
       </div>
     </div>
   );
 }
 
-/**
- * Estilos inline
- * (Luego lo pasamos a Tailwind si quieres)
- */
 const styles = {
   page: {
-    minHeight: "100vh",
+    height: "100vh",
     background: "#0b0f14",
     color: "white",
     fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+    display: "grid",
+    gridTemplateColumns: "320px 1fr"
+  },
+  sidebar: {
+    borderRight: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.03)",
     display: "flex",
-    flexDirection: "column"
+    flexDirection: "column",
+    minWidth: 280
+  },
+  sidebarTop: {
+    padding: 14,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12
+  },
+  brand: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2
+  },
+  primaryBtn: {
+    borderRadius: 12,
+    border: "1px solid rgba(59,130,246,0.35)",
+    background: "rgba(59,130,246,0.18)",
+    color: "white",
+    padding: "10px 12px",
+    fontWeight: 800
+  },
+  chatList: {
+    padding: 10,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    overflowY: "auto",
+    flex: 1
+  },
+  chatItem: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
+    cursor: "pointer"
+  },
+  chatItemActive: {
+    border: "1px solid rgba(59,130,246,0.35)",
+    background: "rgba(59,130,246,0.12)"
+  },
+  bullet: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: "rgba(255,255,255,0.55)"
+  },
+  chatTitle: {
+    fontWeight: 800,
+    fontSize: 13,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap"
+  },
+  chatMeta: {
+    fontSize: 11,
+    opacity: 0.7
+  },
+  iconBtn: {
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    padding: "6px 9px",
+    fontWeight: 900
+  },
+  sidebarFooter: {
+    padding: 14,
+    borderTop: "1px solid rgba(255,255,255,0.08)"
+  },
+  main: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100vh"
   },
   header: {
     padding: "14px 18px",
@@ -281,37 +492,26 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
-    padding: "8px 12px",
-    fontWeight: 700
+    padding: "10px 12px",
+    fontWeight: 800
   },
-  container: {
-    width: "min(980px, 92vw)",
-    margin: "0 auto",
-    display: "flex",
-    flexDirection: "column",
-    flex: 1,
-    padding: "18px 0"
-  },
-  // IMPORTANTE: chat con scroll interno para que no se "corte"
-  chat: {
+  chatArea: {
     flex: 1,
     overflowY: "auto",
-    padding: "10px 6px",
+    padding: "14px 18px",
     display: "flex",
     flexDirection: "column",
-    gap: 12,
-    // para que el input no tape los últimos mensajes
-    paddingBottom: 10
+    gap: 12
   },
   userBubble: {
-    maxWidth: "75%",
+    maxWidth: "76%",
     background: "rgba(59,130,246,0.18)",
     border: "1px solid rgba(59,130,246,0.30)",
     padding: "12px 12px",
     borderRadius: 16
   },
   assistantBubble: {
-    maxWidth: "75%",
+    maxWidth: "76%",
     background: "rgba(255,255,255,0.06)",
     border: "1px solid rgba(255,255,255,0.10)",
     padding: "12px 12px",
@@ -326,12 +526,13 @@ const styles = {
     display: "flex",
     gap: 10,
     borderTop: "1px solid rgba(255,255,255,0.08)",
-    paddingTop: 12
+    padding: "12px 18px",
+    background: "rgba(255,255,255,0.02)"
   },
   textarea: {
     flex: 1,
     minHeight: 56,
-    maxHeight: 160,
+    maxHeight: 170,
     resize: "vertical",
     background: "rgba(255,255,255,0.06)",
     border: "1px solid rgba(255,255,255,0.14)",
@@ -346,18 +547,13 @@ const styles = {
     border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.10)",
     color: "white",
-    fontWeight: 800
-  },
-  footerNote: {
-    fontSize: 12,
-    opacity: 0.7,
-    marginTop: 10
+    fontWeight: 900
   },
   typing: {
     display: "flex",
     alignItems: "center",
     opacity: 0.9,
-    marginTop: 8
+    marginTop: 6
   },
   dot: {
     width: 6,
