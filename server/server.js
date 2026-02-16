@@ -1,19 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-// ==============================
-// CONFIG
-// ==============================
-const API_URL = "http://localhost:8080"; // backend local (para dev). En GitHub Pages NO hay backend.
+
+const API_URL = "http://localhost:8080"; 
 const LS_KEY = "chatgpt_clone_app_state_v3";
 const LS_SESSION = "chatgpt_clone_session_v1";
 
-// Credenciales DEMO (fijas)
+
 const DEMO_USER = "demo@prueba.com";
 const DEMO_PASS = "Demo123!";
 
-// ==============================
-// HELPERS
-// ==============================
+
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
@@ -60,7 +56,7 @@ function LoginView({ onLogin }) {
     setTimeout(() => {
       // Validación simple
       if (email.trim() === DEMO_USER && pass === DEMO_PASS) {
-        // Guardamos sesión fake
+        // Guardar sesión fake
         const session = {
           email: DEMO_USER,
           name: "Demo User",
@@ -147,7 +143,7 @@ export default function App() {
     setSession(null);
   }
 
-  // Si NO hay sesión → mostrar login
+  // Si NO hay sesión -- mostrar login
   if (!session) {
     return <LoginView onLogin={setSession} />;
   }
@@ -188,7 +184,6 @@ export default function App() {
     }
     // Marcar como inicializado después de un pequeño retraso para asegurar renderizado
     setTimeout(() => setIsInitialized(true), 100);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Persistir chats

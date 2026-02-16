@@ -1,19 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-/**
- * ============================================================
- *  CHATGPT CLONE (DEMO) - CON LOGIN FAKE + MULTI-CHAT + SSE
- *  ✅ UI mejorada (más llamativa)
- *  ✅ Tipografía más legible (usa "Inter" si está disponible)
- *  ✅ Código comentado y explicado en todo el archivo
- * ============================================================
- */
 
-/* ============================================================
-   CONFIGURACIÓN GENERAL
-============================================================ */
-
-// URL del backend (solo funciona en local si tienes backend corriendo)
 const API_URL = "http://localhost:8080";
 
 // Claves de localStorage:
@@ -22,16 +9,13 @@ const API_URL = "http://localhost:8080";
 const LS_KEY = "chatgpt_clone_app_state_v3";
 const LS_SESSION = "chatgpt_clone_session_v1";
 
-// Credenciales DEMO fijas (front-only)
+// Credenciales DEMO 
 const DEMO_USER = "demo@prueba.com";
 const DEMO_PASS = "Demo123!";
 
-/* ============================================================
-   HELPERS (UTILIDADES)
-============================================================ */
 
 /**
- * Genera un id "suficientemente único" para chats.
+ * Id para chats.
  * (No es UUID real, pero sirve para un demo).
  */
 function uid() {
