@@ -104,7 +104,7 @@ function LoginView({ onLogin }) {
       // Avisamos al componente padre (App) que ya hay sesión
       onLogin(session);
     } else {
-      setError("Credenciales incorrectas. Usa demo@prueba.com / Demo123!");
+      setError("Credenciales incorrectas.");
     }
   }
 
@@ -120,7 +120,7 @@ function LoginView({ onLogin }) {
           <div>
             <div style={ui.h1}>ChatGPT Clone</div>
             <div style={ui.subtle}>
-              Login demo (zona protegida). Interfaz tipo SaaS.
+              Login demo (zona protegida).  
             </div>
           </div>
         </div>
@@ -147,7 +147,6 @@ function LoginView({ onLogin }) {
               value={pass}
               onChange={(e) => setPass(e.target.value)}
               autoComplete="current-password"
-              placeholder="Demo123!"
               required
             />
           </label>
@@ -158,20 +157,9 @@ function LoginView({ onLogin }) {
             Iniciar sesión
           </button>
 
-          <div style={ui.hintBox}>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Credenciales demo</div>
-            <div style={ui.monoLine}>
-              <span style={ui.kbd}>Usuario</span> demo@prueba.com
-            </div>
-            <div style={ui.monoLine}>
-              <span style={ui.kbd}>Clave</span> Demo123!
-            </div>
-          </div>
         </form>
 
-        <div style={ui.footerNote}>
-          Hecho con React/Vite · Persistencia en localStorage · SSE en modo local
-        </div>
+
       </div>
     </div>
   );
