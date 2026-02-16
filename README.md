@@ -26,36 +26,49 @@ Arquitectura
 5. El frontend renderiza la respuesta progresivamente.
 
 Ejecución Local
+
 Clonar repositorio:
 git clone https://github.com/angieg2400/my-chatgpt-clone.git
 
+
 Instalar dependencias 
+
 Backend:
+
 cd server
 npm install
 
 Frontend:
+
 cd ../client
 npm install
 
 Instalar Ollama
+
 Descargar desde:
 https://ollama.com
+
 Instalar modelo:
 ollama pull llama3.2:3b
 
 Ejecutar backend:
+
 cd server
 node server.js
+
 Servidor disponible en:
 http://localhost:8080 
 
 Ejecutar frontend:
+
 cd client
 npm run dev
+
 Aplicacion disponible en:
 http://localhost:5173
 
 Autora
+
 Angie Gomez
+
 LinkedIn: https://www.linkedin.com/in/angie-gómez-benavides-3b5378342
